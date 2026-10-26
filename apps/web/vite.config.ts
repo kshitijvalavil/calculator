@@ -2,6 +2,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { fileURLToPath } from "node:url";
+
+const engineMock = fileURLToPath(new URL("./src/test/engineMock.ts", import.meta.url));
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -14,5 +17,7 @@ export default defineConfig({
     setupFiles: ["src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
     css: false,
+    // Unit tests run against a table-driven stand-in; e2e tests use the real engine.
+    alias: { "@calc/engine": engineMock },
   },
 });

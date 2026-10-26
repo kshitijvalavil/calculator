@@ -77,9 +77,12 @@ export function Display({ segments, evaluated, preview, mode, angle }: Props) {
         ) : (
           segments.map((s, i) =>
             i === lastIndex && !evaluated ? (
-              <mark key={i} className={`tok tok--${s.kind} tok--last`}>
-                {s.text}
-              </mark>
+              // Spaces around an operator stay outside the highlight so it hugs the symbol.
+              <span key={i} className={`tok tok--${s.kind}`}>
+                {s.text.startsWith(" ") && " "}
+                <mark className={`tok--last tok--${s.kind}`}>{s.text.trim()}</mark>
+                {s.text.endsWith(" ") && " "}
+              </span>
             ) : (
               <span key={i} className={`tok tok--${s.kind}`}>
                 {s.text}

@@ -90,39 +90,40 @@ function TapeItem({
       >
         {item.expression.replace(/sqrt\(/g, "√(")}
       </button>
-      <div className="tape__row">
+      <button
+        type="button"
+        className="tape__result"
+        data-testid="history-result"
+        onClick={() => onReuseResult(item)}
+        aria-label={`Reuse result ${item.result}`}
+      >
+        <span className="tape__eq">= </span>
+        {item.result}
+      </button>
+      <div className="tape__foot">
         <span className="tape__meta">
           {!Number.isNaN(created.getTime()) && <time dateTime={item.created_at}>{timeFmt.format(created)}</time>}
           {item.mode === "scientific" && <span className="tape__chip">{item.angle.toUpperCase()}</span>}
         </span>
-        <button
-          type="button"
-          className="tape__result"
-          data-testid="history-result"
-          onClick={() => onReuseResult(item)}
-          aria-label={`Reuse result ${item.result}`}
-        >
-          = {item.result}
-        </button>
-      </div>
-      <div className="tape__actions">
-        <button
-          ref={editBtnRef}
-          type="button"
-          className="icon-btn icon-btn--sm"
-          aria-label={item.label ? `Edit label for ${item.expression}` : `Add label to ${item.expression}`}
-          onClick={() => setEditing(true)}
-        >
-          <TagIcon />
-        </button>
-        <button
-          type="button"
-          className="icon-btn icon-btn--sm icon-btn--danger"
-          aria-label={`Delete ${item.expression}`}
-          onClick={() => onDelete(item.id)}
-        >
-          <TrashIcon />
-        </button>
+        <span className="tape__actions">
+          <button
+            ref={editBtnRef}
+            type="button"
+            className="icon-btn icon-btn--sm"
+            aria-label={item.label ? `Edit label for ${item.expression}` : `Add label to ${item.expression}`}
+            onClick={() => setEditing(true)}
+          >
+            <TagIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-btn icon-btn--sm icon-btn--danger"
+            aria-label={`Delete ${item.expression}`}
+            onClick={() => onDelete(item.id)}
+          >
+            <TrashIcon />
+          </button>
+        </span>
       </div>
     </li>
   );

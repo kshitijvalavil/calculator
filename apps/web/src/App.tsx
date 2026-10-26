@@ -16,6 +16,20 @@ import { commandForKey, keyIdFor, type KeyCommand } from "./lib/keymap";
 
 const MODE_KEY = "calc.mode";
 
+/**
+ * The button last focused by a pointer. A button reached with Tab keeps native Enter/Space;
+ * one that merely kept focus after a click doesn't, so Enter still means "=".
+ */
+let pointerFocused: Element | null = null;
+if (typeof window !== "undefined") {
+  window.addEventListener("pointerdown", (e) => {
+    pointerFocused = e.target instanceof Element ? e.target.closest("button, a") : null;
+  }, true);
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Tab") pointerFocused = null;
+  }, true);
+}
+
 function storedMode() {
   try {
     return localStorage.getItem(MODE_KEY) === "scientific" ? "scientific" : "standard";
@@ -97,7 +111,7 @@ export function App({ store }: { store: HistoryStore }) {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
-      const target = e.target as HTMLElement | null;
+      const target = e.target instanceof Element ? e.target : null;
       if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
       if (e.key === "Escape" && sheetOpen) {
         setSheetOpen(false);
@@ -105,7 +119,13 @@ export function App({ store }: { store: HistoryStore }) {
         return;
       }
       const interactive = target?.closest("button, a");
-      if ((e.key === "Enter" || e.key === " ") && interactive && interactive.matches(":focus-visible")) return;
+      if ((e.key === "Enter" || e.key === " ") && interactive) {
+        if (interactive !== pointerFocused) return;
+        if (e.key === " ") {
+          e.preventDefault();
+          return;
+        }
+      }
       const cmd = commandForKey(e.key);
       if (!cmd) return;
       e.preventDefault();
@@ -206,7 +226,7 @@ export function App({ store }: { store: HistoryStore }) {
                   type="button"
                   className="segmented__btn"
                   aria-pressed={state.mode === m}
-                  aria-controls={m === "scientific" ? "scientific-keys" : undefined}
+                  aria-controls={m === "scientific" && scientific ? "scientific-keys" : undefined}
                   onClick={() => dispatch({ type: "mode", mode: m })}
                 >
                   {m === "standard" ? "Standard" : "Scientific"}
