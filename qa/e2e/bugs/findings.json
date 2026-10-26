@@ -1,0 +1,22 @@
+[
+  {
+    "name": "corrupted localStorage history",
+    "problem": "app white-screens with schema-invalid history in calc.history.v1,calc.mode | Cannot read properties of null (reading 'id')",
+    "screenshot": "qa/e2e/bugs/corrupted-localstorage-history.png"
+  },
+  {
+    "name": "5000-entry history renders",
+    "problem": "slow with 5000 entries: reload 1948 ms, one calc 2750 ms",
+    "screenshot": "qa/e2e/bugs/5000-entry-history-renders.png"
+  },
+  {
+    "name": "320 scientific: 170 factorial result fits",
+    "problem": "result text extends beyond its clipping container (text -98..271px, container 49..271px) - digits are cut off",
+    "screenshot": "qa/e2e/bugs/320-scientific-170-factorial-result-fits.png"
+  },
+  {
+    "name": "320 scientific: 2÷3 long result fits",
+    "problem": "result text extends beyond its clipping container (text -40..271px, container 49..271px) - digits are cut off",
+    "screenshot": "qa/e2e/bugs/320-scientific-2-3-long-result-fits.png"
+  }
+]
