@@ -1,6 +1,7 @@
 import { D, E, PI, PI_T, PRECISION, T, type Dec } from "./decimal.ts";
 import { fail, MESSAGES } from "./errors.ts";
-import type { Node } from "./parser.ts";
+import type { Program } from "./parser.ts";
+import type { FunctionName } from "./tokenizer.ts";
 import type { AngleUnit } from "../../../contract/types.ts";
 
 /** Trig results smaller than this in magnitude snap to exactly 0. */
@@ -49,7 +50,7 @@ function trig(name: "sin" | "cos" | "tan", x: Dec, angle: AngleUnit): Dec {
 }
 
 function factorial(x: Dec): Dec {
-  if (!x.isInteger() || x.isNegative()) return fail("DOMAIN", MESSAGES.factorialDomain);
+  if (!x.isInteger() || (x.isNegative() && !x.isZero())) return fail("DOMAIN", MESSAGES.factorialDomain);
   if (x.gt(MAX_FACTORIAL)) return fail("OVERFLOW", MESSAGES.factorialOverflow);
   const n = x.toNumber();
   let acc = new D(1);
@@ -63,61 +64,78 @@ function power(base: Dec, exponent: Dec): Dec {
   return base.pow(exponent);
 }
 
-/** Evaluates a parsed expression tree with decimal.js at 34 significant digits. */
-export function evaluateNode(node: Node, angle: AngleUnit): Dec {
-  switch (node.type) {
-    case "number":
-      return checked(new D(node.value));
-    case "const":
-      return node.name === "pi" ? PI : E;
-    case "negate":
-      return evaluateNode(node.arg, angle).negated();
-    case "postfix": {
-      const v = evaluateNode(node.arg, angle);
-      return checked(node.op === "%" ? v.div(100) : factorial(v));
-    }
-    case "power":
-      return checked(power(evaluateNode(node.base, angle), evaluateNode(node.exponent, angle)));
-    case "chain": {
-      let acc = evaluateNode(node.first, angle);
-      for (const { op, operand } of node.rest) {
-        const v = evaluateNode(operand, angle);
-        switch (op) {
-          case "+":
-            acc = acc.plus(v);
-            break;
-          case "-":
-            acc = acc.minus(v);
-            break;
-          case "*":
-            acc = acc.times(v);
-            break;
-          case "/":
-            if (v.isZero()) return fail("DIVIDE_BY_ZERO", MESSAGES.divideByZero);
-            acc = acc.div(v);
-            break;
-        }
-        acc = checked(acc);
+function applyBinary(op: "+" | "-" | "*" | "/" | "^", a: Dec, b: Dec): Dec {
+  switch (op) {
+    case "+":
+      return a.plus(b);
+    case "-":
+      return a.minus(b);
+    case "*":
+      return a.times(b);
+    case "/":
+      if (b.isZero()) return fail("DIVIDE_BY_ZERO", MESSAGES.divideByZero);
+      return a.div(b);
+    case "^":
+      return power(a, b);
+  }
+}
+
+function applyCall(name: FunctionName, v: Dec, angle: AngleUnit): Dec {
+  switch (name) {
+    case "sqrt":
+      if (v.isNegative() && !v.isZero()) return fail("DOMAIN", MESSAGES.sqrtNegative);
+      return v.abs().sqrt();
+    case "ln":
+      if (v.lte(0)) return fail("DOMAIN", MESSAGES.logNonPositive);
+      return v.ln();
+    case "log":
+      if (v.lte(0)) return fail("DOMAIN", MESSAGES.logNonPositive);
+      return v.log(10);
+    case "sin":
+    case "cos":
+    case "tan":
+      return trig(name, v, angle);
+  }
+}
+
+/**
+ * Runs a reverse-Polish program on a value stack (iterative, so input depth
+ * never touches the call stack), with decimal.js at 34 significant digits.
+ */
+export function run(program: Program, angle: AngleUnit): Dec {
+  const stack: Dec[] = [];
+  const pop = (): Dec => {
+    const v = stack.pop();
+    // Unreachable for programs produced by `parse`.
+    return v ?? fail("SYNTAX", MESSAGES.syntax);
+  };
+  for (const ins of program) {
+    switch (ins.type) {
+      case "number":
+        stack.push(checked(new D(ins.value)));
+        break;
+      case "const":
+        stack.push(ins.name === "pi" ? PI : E);
+        break;
+      case "negate":
+        stack.push(pop().negated());
+        break;
+      case "postfix": {
+        const v = pop();
+        stack.push(checked(ins.op === "%" ? v.div(100) : factorial(v)));
+        break;
       }
-      return acc;
-    }
-    case "call": {
-      const v = evaluateNode(node.arg, angle);
-      switch (node.name) {
-        case "sqrt":
-          if (v.isNegative() && !v.isZero()) return fail("DOMAIN", MESSAGES.sqrtNegative);
-          return v.abs().sqrt();
-        case "ln":
-          if (v.lte(0)) return fail("DOMAIN", MESSAGES.logNonPositive);
-          return checked(v.ln());
-        case "log":
-          if (v.lte(0)) return fail("DOMAIN", MESSAGES.logNonPositive);
-          return checked(v.log(10));
-        case "sin":
-        case "cos":
-        case "tan":
-          return checked(trig(node.name, v, angle));
+      case "binary": {
+        const b = pop();
+        const a = pop();
+        stack.push(checked(applyBinary(ins.op, a, b)));
+        break;
       }
+      case "call":
+        stack.push(checked(applyCall(ins.name, pop(), angle)));
+        break;
     }
   }
+  if (stack.length !== 1) return fail("SYNTAX", MESSAGES.syntax);
+  return stack[0]!;
 }

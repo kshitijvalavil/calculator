@@ -1,167 +1,174 @@
 import { fail, MESSAGES } from "./errors.ts";
 import type { ConstantName, FunctionName, PostfixOp, Token } from "./tokenizer.ts";
 
-export type Node =
+/** One step of the reverse-Polish program that the evaluator runs on a value stack. */
+export type Instruction =
   | { type: "number"; value: string }
   | { type: "const"; name: ConstantName }
-  | { type: "call"; name: FunctionName; arg: Node }
-  | { type: "negate"; arg: Node }
-  | { type: "postfix"; op: PostfixOp; arg: Node }
-  | { type: "power"; base: Node; exponent: Node }
-  /** Left-associative chain, flattened so long inputs don't recurse deeply. */
-  | { type: "chain"; first: Node; rest: { op: "+" | "-" | "*" | "/"; operand: Node }[] };
+  | { type: "binary"; op: "+" | "-" | "*" | "/" | "^" }
+  | { type: "negate" }
+  | { type: "postfix"; op: PostfixOp }
+  | { type: "call"; name: FunctionName };
 
-/** Maximum nesting of brackets, function calls and exponents. */
-export const MAX_DEPTH = 256;
+export type Program = Instruction[];
+
+/** Maximum nesting of brackets and function calls. Parsing is iterative, so this is a sanity limit, not a stack guard. */
+export const MAX_DEPTH = 1000;
+
+type StackOp =
+  | { type: "binary"; op: "+" | "-" | "*" | "/" | "^" }
+  | { type: "negate" }
+  | { type: "lparen" }
+  | { type: "func"; name: FunctionName };
+
+/** Binding power, loosest to tightest: + - < × ÷ < unary minus < ^ (postfix % ! is applied immediately). */
+const PRECEDENCE = { "+": 1, "-": 1, "*": 2, "/": 2, negate: 3, "^": 4 } as const;
+
+const precedenceOf = (op: StackOp): number =>
+  op.type === "binary" ? PRECEDENCE[op.op] : op.type === "negate" ? PRECEDENCE.negate : -1;
 
 /**
- * Recursive-descent parser. Grammar, loosest to tightest:
+ * Iterative shunting-yard parser (no recursion, so deep nesting and long
+ * chains can't overflow the call stack). Produces a reverse-Polish program.
  *
- *   expr    := term (("+" | "-") term)*
- *   term    := unary (("*" | "/") unary | <implicit ×> unary)*
- *   unary   := ("-" | "+")* power
- *   power   := postfix ("^" unary)?          (right-associative, exponent may be signed)
- *   postfix := primary ("%" | "!")*
- *   primary := number | const | func "(" expr ")" | "(" expr ")"
- *
- * Implicit multiplication applies only between a number and "(", a constant
- * or a function, and between ")" and "(".
+ * Rules:
+ * - `^` is right-associative; its exponent may carry a sign (`2 ^ -1`).
+ * - Unary minus binds looser than `^` (`-2 ^ 2 = -4`), tighter than × ÷.
+ * - Postfix `%` and `!` bind tightest.
+ * - Implicit multiplication only between a number and "(", a constant or a
+ *   function, and between ")" and "(".
+ * - Functions must be followed by "(".
  */
-export function parse(tokens: Token[]): Node {
-  let pos = 0;
+export function parse(tokens: Token[]): Program {
+  const out: Program = [];
+  const ops: StackOp[] = [];
   let depth = 0;
+  let expectOperand = true;
 
-  const peek = (): Token | undefined => tokens[pos];
+  const pushBinary = (op: "+" | "-" | "*" | "/" | "^") => {
+    const p = PRECEDENCE[op];
+    const rightAssoc = op === "^";
+    for (;;) {
+      const top = ops[ops.length - 1];
+      if (!top || top.type === "lparen" || top.type === "func") break;
+      const tp = precedenceOf(top);
+      if (tp > p || (tp === p && !rightAssoc)) {
+        ops.pop();
+        out.push(top.type === "negate" ? { type: "negate" } : { type: "binary", op: top.op });
+      } else break;
+    }
+    ops.push({ type: "binary", op });
+  };
 
-  const enter = () => {
+  /** Pops operators down to the nearest "(" (exclusive). Returns false if there is none. */
+  const popToParen = (): boolean => {
+    for (;;) {
+      const top = ops.pop();
+      if (!top) return false;
+      if (top.type === "lparen") return true;
+      if (top.type === "func") return false; // unreachable: a func is always directly below its "("
+      out.push(top.type === "negate" ? { type: "negate" } : { type: "binary", op: top.op });
+    }
+  };
+
+  const openParen = () => {
     if (++depth > MAX_DEPTH) fail("SYNTAX", MESSAGES.tooDeep);
+    ops.push({ type: "lparen" });
   };
 
-  const unexpected = (t: Token | undefined): never => {
-    if (!t) return fail("SYNTAX", MESSAGES.incomplete);
-    if (t.type === "rparen") return fail("SYNTAX", MESSAGES.brackets);
-    return fail("SYNTAX", MESSAGES.syntax);
-  };
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]!;
 
-  function parseExpr(): Node {
-    const first = parseTerm();
-    const rest: { op: "+" | "-"; operand: Node }[] = [];
-    for (;;) {
-      const t = peek();
-      if (t?.type === "op" && (t.value === "+" || t.value === "-")) {
-        pos++;
-        rest.push({ op: t.value, operand: parseTerm() });
-      } else break;
-    }
-    return rest.length ? { type: "chain", first, rest } : first;
-  }
-
-  function implicitFollows(): boolean {
-    const prev = tokens[pos - 1];
-    const next = peek();
-    if (!prev || !next) return false;
-    if (prev.type === "number") {
-      return next.type === "lparen" || next.type === "const" || next.type === "func";
-    }
-    return prev.type === "rparen" && next.type === "lparen";
-  }
-
-  function parseTerm(): Node {
-    const first = parseUnary();
-    const rest: { op: "*" | "/"; operand: Node }[] = [];
-    for (;;) {
-      const t = peek();
-      if (t?.type === "op" && (t.value === "*" || t.value === "/")) {
-        pos++;
-        rest.push({ op: t.value, operand: parseUnary() });
-      } else if (implicitFollows()) {
-        rest.push({ op: "*", operand: parseUnary() });
-      } else break;
-    }
-    return rest.length ? { type: "chain", first, rest } : first;
-  }
-
-  function parseUnary(): Node {
-    let negative = false;
-    for (;;) {
-      const t = peek();
-      if (t?.type === "op" && (t.value === "-" || t.value === "+")) {
-        if (t.value === "-") negative = !negative;
-        pos++;
-      } else break;
-    }
-    const inner = parsePower();
-    return negative ? { type: "negate", arg: inner } : inner;
-  }
-
-  function parsePower(): Node {
-    const base = parsePostfix();
-    const t = peek();
-    if (t?.type === "op" && t.value === "^") {
-      pos++;
-      enter();
-      const exponent = parseUnary();
-      depth--;
-      return { type: "power", base, exponent };
-    }
-    return base;
-  }
-
-  function parsePostfix(): Node {
-    let node = parsePrimary();
-    for (;;) {
-      const t = peek();
-      if (t?.type === "postfix") {
-        pos++;
-        node = { type: "postfix", op: t.value, arg: node };
-      } else break;
-    }
-    return node;
-  }
-
-  function parseParenthesised(): Node {
-    const open = peek();
-    if (open?.type !== "lparen") return unexpected(open);
-    pos++;
-    enter();
-    const inner = parseExpr();
-    depth--;
-    const close = peek();
-    if (close?.type !== "rparen") {
-      // Missing ")" (including running off the end) is a bracket problem.
-      if (!close) fail("SYNTAX", MESSAGES.brackets);
-      return unexpected(close);
-    }
-    pos++;
-    return inner;
-  }
-
-  function parsePrimary(): Node {
-    const t = peek();
-    if (!t) return unexpected(t);
-    switch (t.type) {
-      case "number":
-        pos++;
-        return { type: "number", value: t.value };
-      case "const":
-        pos++;
-        return { type: "const", name: t.name };
-      case "func": {
-        pos++;
-        const next = peek();
-        if (next?.type !== "lparen") {
-          return fail("SYNTAX", next ? `Use brackets after ${t.name}, like ${t.name}(2)` : MESSAGES.incomplete);
+    if (expectOperand) {
+      switch (t.type) {
+        case "op": {
+          if (t.value !== "+" && t.value !== "-") return fail("SYNTAX", MESSAGES.syntax);
+          // Collapse a run of signs into at most one negation.
+          let negative = false;
+          let j = i;
+          for (; j < tokens.length; j++) {
+            const s = tokens[j]!;
+            if (s.type === "op" && (s.value === "+" || s.value === "-")) {
+              if (s.value === "-") negative = !negative;
+            } else break;
+          }
+          i = j - 1;
+          if (negative) ops.push({ type: "negate" });
+          break;
         }
-        return { type: "call", name: t.name, arg: parseParenthesised() };
+        case "number":
+          out.push({ type: "number", value: t.value });
+          expectOperand = false;
+          break;
+        case "const":
+          out.push({ type: "const", name: t.name });
+          expectOperand = false;
+          break;
+        case "func": {
+          const next = tokens[i + 1];
+          if (next?.type !== "lparen") {
+            return fail("SYNTAX", next ? `Use brackets after ${t.name}, like ${t.name}(2)` : MESSAGES.incomplete);
+          }
+          ops.push({ type: "func", name: t.name });
+          openParen();
+          i++; // consume "("
+          break;
+        }
+        case "lparen":
+          openParen();
+          break;
+        case "rparen":
+          return fail("SYNTAX", MESSAGES.brackets);
+        case "postfix":
+          return fail("SYNTAX", MESSAGES.syntax);
+      }
+      continue;
+    }
+
+    // Expecting an operator.
+    switch (t.type) {
+      case "op":
+        pushBinary(t.value);
+        expectOperand = true;
+        break;
+      case "postfix":
+        // Tightest binding: applies straight to the operand just completed.
+        out.push({ type: "postfix", op: t.value });
+        break;
+      case "rparen": {
+        if (!popToParen()) return fail("SYNTAX", MESSAGES.brackets);
+        depth--;
+        const top = ops[ops.length - 1];
+        if (top?.type === "func") {
+          ops.pop();
+          out.push({ type: "call", name: top.name });
+        }
+        break;
       }
       case "lparen":
-        return parseParenthesised();
-      default:
-        return unexpected(t);
+      case "const":
+      case "func": {
+        const prev = tokens[i - 1]!;
+        const implicit = prev.type === "number" || (prev.type === "rparen" && t.type === "lparen");
+        if (!implicit) return fail("SYNTAX", MESSAGES.syntax);
+        pushBinary("*");
+        expectOperand = true;
+        i--; // re-read this token as an operand
+        break;
+      }
+      case "number":
+        return fail("SYNTAX", MESSAGES.syntax);
     }
   }
 
-  const tree = parseExpr();
-  if (pos < tokens.length) unexpected(tokens[pos]);
-  return tree;
+  if (expectOperand) {
+    // Running out after "(" with nothing inside is still a bracket problem.
+    return fail("SYNTAX", tokens[tokens.length - 1]?.type === "lparen" ? MESSAGES.brackets : MESSAGES.incomplete);
+  }
+  for (let k = ops.length - 1; k >= 0; k--) {
+    const top = ops[k]!;
+    if (top.type === "lparen" || top.type === "func") return fail("SYNTAX", MESSAGES.brackets);
+    out.push(top.type === "negate" ? { type: "negate" } : { type: "binary", op: top.op });
+  }
+  return out;
 }

@@ -18,7 +18,7 @@ export const MESSAGES = {
   brackets: "Check the brackets",
   incomplete: "Finish the expression",
   syntax: "Check the expression",
-  tooDeep: "Too many nested brackets",
+  tooDeep: "Expression is too deeply nested",
   tooComplex: "That expression is too complex",
   divideByZero: "Can't divide by zero",
   sqrtNegative: "Can't take the square root of a negative number",

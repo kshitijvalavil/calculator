@@ -1,7 +1,7 @@
 import type { AngleUnit, Evaluate, EvaluateOptions, EvaluateResult } from "../../../contract/types.ts";
 import { D, OUTPUT_DIGITS, resetDecimalConfig, type Dec } from "./decimal.ts";
 import { CalcFailure, MESSAGES } from "./errors.ts";
-import { evaluateNode } from "./evaluator.ts";
+import { run } from "./evaluator.ts";
 import { parse } from "./parser.ts";
 import { tokenize } from "./tokenizer.ts";
 
@@ -14,7 +14,7 @@ export type {
   EvaluateResult,
 } from "../../../contract/types.ts";
 export { tokenize, FUNCTIONS, CONSTANTS, type Token } from "./tokenizer.ts";
-export { parse, MAX_DEPTH, type Node } from "./parser.ts";
+export { parse, MAX_DEPTH, type Program, type Instruction } from "./parser.ts";
 export { CalcFailure, MESSAGES } from "./errors.ts";
 
 const OVERFLOW_LIMIT = new D("1e1000");
@@ -36,8 +36,8 @@ export const evaluate: Evaluate = (expression: string, options?: EvaluateOptions
     if (typeof expression !== "string" || expression.trim() === "") {
       return { ok: false, error: { code: "EMPTY", message: MESSAGES.empty } };
     }
-    const tree = parse(tokenize(expression));
-    return { ok: true, result: formatResult(evaluateNode(tree, angle)) };
+    const program = parse(tokenize(expression));
+    return { ok: true, result: formatResult(run(program, angle)) };
   } catch (err) {
     if (err instanceof CalcFailure) return { ok: false, error: err.toCalcError() };
     // Anything else (a decimal.js internal limit, a stack overflow) must not

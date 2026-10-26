@@ -191,11 +191,12 @@ describe("nested functions and brackets", () => {
     expect(ok("sqrt(".repeat(5) + "4294967296" + ")".repeat(5))).toBe("2");
   });
 
-  it("rejects pathological nesting instead of overflowing the stack", () => {
+  it("rejects nesting beyond MAX_DEPTH with an accurate SYNTAX message", () => {
+    expect(MAX_DEPTH).toBeGreaterThanOrEqual(1000);
     const n = MAX_DEPTH + 1;
-    expect(err("(".repeat(n) + "1" + ")".repeat(n))).toBe("SYNTAX");
-    expect(err("(".repeat(100000) + "1" + ")".repeat(100000))).toBe("SYNTAX");
-    expect(err(Array(5000).fill("2").join("^"))).toBe("SYNTAX");
+    for (const expr of ["(".repeat(n) + "1" + ")".repeat(n), "(".repeat(100000) + "1" + ")".repeat(100000), "sqrt(".repeat(n) + "1" + ")".repeat(n)]) {
+      expect(evaluate(expr)).toEqual({ ok: false, error: { code: "SYNTAX", message: "Expression is too deeply nested" } });
+    }
   });
 
   it.each(["(", ")", "()", "(2+3))", ")2(", "2+(3", "((2)", "2)"])("%s is SYNTAX", (expr) => {
@@ -358,11 +359,57 @@ describe("internals", () => {
     ]);
   });
 
-  it("parses -2 ^ 2 as -(2 ^ 2)", () => {
-    expect(parse(tokenize("-2^2"))).toEqual({
-      type: "negate",
-      arg: { type: "power", base: { type: "number", value: "2" }, exponent: { type: "number", value: "2" } },
-    });
+  it("parses -2 ^ 2 as -(2 ^ 2) in reverse-Polish order", () => {
+    expect(parse(tokenize("-2^2"))).toEqual([
+      { type: "number", value: "2" },
+      { type: "number", value: "2" },
+      { type: "binary", op: "^" },
+      { type: "negate" },
+    ]);
+  });
+
+  it("parses 2 ^ -3 ^ 2 as 2 ^ (-(3 ^ 2))", () => {
+    expect(ok("2 ^ -3 ^ 2")).toBe(ok("1 ÷ 2 ^ 9"));
+    expect(ok("2^-3×4")).toBe("0.5");
+  });
+});
+
+describe("regressions from QA (Sherlock Bugs)", () => {
+  // E1: deep nesting must work up to at least 1000 levels without recursion.
+  it.each([
+    ["500 nested parens", "(".repeat(500) + "1" + ")".repeat(500), "1"],
+    ["1000 nested parens", "(".repeat(1000) + "1" + ")".repeat(1000), "1"],
+    ["500 nested parens with ops", "(".repeat(500) + "1" + "+1)".repeat(500), "501"],
+    ["500 nested sqrt", "sqrt(".repeat(500) + "1" + ")".repeat(500), "1"],
+    ["1000 nested sqrt", "sqrt(".repeat(1000) + "1" + ")".repeat(1000), "1"],
+    ["5000-level power chain", "1^".repeat(5000) + "1", "1"],
+    ["50000-level power chain", "1^".repeat(50000) + "1", "1"],
+    ["20000 factorials", "0" + "!".repeat(20000), "1"],
+    ["100000 unary minus", "-".repeat(100000) + "1", "1"],
+    ["20000 percents", "1" + "%".repeat(20000), "1e-40000"],
+  ])("%s", (_name, expr, expected) => {
+    expect(ok(expr)).toBe(expected);
+  });
+
+  it("E1: 100000 open parens only is SYNTAX", () => {
+    expect(err("(".repeat(100000))).toBe("SYNTAX");
+  });
+
+  // E2: no "brackets" message for bracket-free input.
+  it("E2: long power chains never mention brackets", () => {
+    const r = evaluate("2^".repeat(5000) + "2");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error.code).toBe("OVERFLOW");
+      expect(r.error.message).not.toMatch(/bracket/i);
+    }
+  });
+
+  // E3: -0 is a non-negative integer.
+  it("E3: (-0)! = 1", () => {
+    expect(ok("(-0)!")).toBe("1");
+    expect(ok("(0 × -1)!")).toBe("1");
+    expect(err("(-1)!")).toBe("DOMAIN");
   });
 });
 

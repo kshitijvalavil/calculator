@@ -127,7 +127,6 @@ describe("POST /calculate", () => {
 
   it("agrees with every contract case", async () => {
     for (const c of contract.cases as { expression: string; angle?: "deg" | "rad"; result?: string; error?: string }[]) {
-      if (c.expression.length === 0) continue; // empty string is a 400 (body rule), checked below
       const { status, json } = await calculate({ expression: c.expression, mode: "scientific", angle: c.angle });
       if (c.error) {
         expect(status, c.expression).toBe(422);
@@ -147,7 +146,6 @@ describe("POST /calculate", () => {
     ["null", undefined, null],
     ["missing expression", undefined, { mode: "standard" }],
     ["non-string expression", undefined, { expression: 42, mode: "standard" }],
-    ["empty expression", undefined, { expression: "", mode: "standard" }],
     ["501-char expression", undefined, { expression: "1".repeat(501), mode: "standard" }],
     ["missing mode", undefined, { expression: "1+1" }],
     ["bad mode", undefined, { expression: "1+1", mode: "graphing" }],
@@ -335,7 +333,7 @@ describe("DELETE /history/:id", () => {
 describe("routing", () => {
   it("returns 404 for unknown paths", async () => {
     expect((await call("/nope")).status).toBe(404);
-    expect((await handler(new Request("http://x/other-function"))).status).toBe(404);
+    expect((await handler(new Request("http://x/other-function", { headers: { Authorization: `Bearer ${ALICE}` } }))).status).toBe(404);
   });
 
   it("returns 405 with Allow for a wrong method", async () => {
@@ -398,6 +396,70 @@ describe("CORS", () => {
     const res = await h(new Request(BASE, { method: "OPTIONS" }));
     expect(res.headers.get("access-control-allow-origin")).toBe("https://calc.example.com");
     expect(res.headers.get("vary")).toBe("Origin");
+  });
+});
+
+describe("regressions from QA (Sherlock Bugs)", () => {
+  it.each(["/history/%E0%A4%A", "/history/%", "/history/%00", "/history/%ZZ"])(
+    "A1: malformed id %s is 404 for PATCH and DELETE, never 500",
+    async (path) => {
+      expect((await call(path, { method: "DELETE" })).status).toBe(404);
+      expect((await call(path, { method: "PATCH", body: { label: "x" } })).status).toBe(404);
+    },
+  );
+
+  it.each([
+    ["DELETE", "/history/%E0%A4%A"],
+    ["GET", "/nope"],
+    ["GET", ""],
+    ["POST", "/history"],
+  ])("A1: %s %s without auth is 401 (auth is checked before routing)", async (method, path) => {
+    const { status, json } = await call(path, { method, token: null });
+    expect(status).toBe(401);
+    expect(json.error.code).toBe("UNAUTHORIZED");
+  });
+
+  it('A2: expression "" is 422 EMPTY and nothing is saved', async () => {
+    const { status, json } = await calculate({ expression: "", mode: "standard" });
+    expect(status).toBe(422);
+    expect(json.error.code).toBe("EMPTY");
+    expect(store.allRows()).toHaveLength(0);
+  });
+
+  it("A2: a 501-character expression is still 400", async () => {
+    expect((await calculate({ expression: "1".repeat(501), mode: "standard" })).status).toBe(400);
+  });
+
+  it("A3: NUL bytes in the expression are never saved (engine answers 422 SYNTAX first)", async () => {
+    for (const expression of ["1+\u00001", "1+1\u0000"]) {
+      const { status, json } = await calculate({ expression, mode: "standard" });
+      expect(status).toBe(422);
+      expect(json.error.code).toBe("SYNTAX");
+    }
+    expect(store.allRows()).toHaveLength(0);
+  });
+
+  it("A3: a NUL expression is 400 even if an engine were to accept it", async () => {
+    const lenient = createHandler({ evaluate: () => ({ ok: true, result: "2" }), repoFor: store.repoFor });
+    const res = await lenient(
+      new Request(BASE, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ALICE}` },
+        body: JSON.stringify({ expression: "1+\u00001", mode: "standard" }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(store.allRows()).toHaveLength(0);
+  });
+
+  it("A3: NUL bytes in the label are 400", async () => {
+    const saved = await save("1+1");
+    for (const label of ["a\u0000b", "\u0000"]) {
+      const { status, json } = await call(`/history/${saved.id}`, { method: "PATCH", body: { label } });
+      expect(status).toBe(400);
+      expect(json.error.code).toBe("BAD_REQUEST");
+    }
+    expect(store.allRows()[0]!.label).toBeNull();
   });
 });
 

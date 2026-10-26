@@ -51,7 +51,15 @@ export function matchRoute(pathname: string): Route | null {
   if (p === "" || p === "/calculate") return { name: "calculate", methods: ["POST"] };
   if (p === "/history") return { name: "history", methods: ["GET"] };
   const m = /^\/history\/([^/]+)$/.exec(p);
-  if (m) return { name: "item", id: decodeURIComponent(m[1]!), methods: ["PATCH", "DELETE"] };
+  if (m) {
+    let id: string;
+    try {
+      id = decodeURIComponent(m[1]!);
+    } catch {
+      id = m[1]!; // malformed percent-encoding: keep raw, it will fail the uuid check (404)
+    }
+    return { name: "item", id, methods: ["PATCH", "DELETE"] };
+  }
   return null;
 }
 
@@ -92,9 +100,9 @@ async function readJsonObject(req: Request): Promise<Record<string, unknown>> {
 function parseCalculateBody(body: Record<string, unknown>): { expression: string; mode: Mode; angle: AngleUnit } {
   const { expression, mode, angle } = body;
   if (typeof expression !== "string") throw badRequest("expression must be a string");
-  const len = charLength(expression);
-  if (len < 1 || len > LIMITS.expressionMax) {
-    throw badRequest(`expression must be 1 to ${LIMITS.expressionMax} characters`);
+  // "" is allowed through so the engine can answer 422 EMPTY; it is never saved.
+  if (charLength(expression) > LIMITS.expressionMax) {
+    throw badRequest(`expression must be at most ${LIMITS.expressionMax} characters`);
   }
   if (typeof mode !== "string" || !MODES.includes(mode as Mode)) {
     throw badRequest('mode must be "standard" or "scientific"');
@@ -111,6 +119,7 @@ function parseLabelBody(body: Record<string, unknown>): string | null {
   const { label } = body;
   if (label === null) return null;
   if (typeof label !== "string") throw badRequest("label must be a string or null");
+  if (label.includes("\u0000")) throw badRequest("label must not contain NUL characters");
   const trimmed = label.trim();
   if (trimmed === "") return null;
   if (charLength(trimmed) > LIMITS.labelMax) throw badRequest(`label must be at most ${LIMITS.labelMax} characters`);
@@ -157,6 +166,10 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     const method = req.method.toUpperCase();
     if (method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
 
+    // Auth comes before any routing or parsing, so a request without a token is always 401.
+    const token = bearerToken(req);
+    if (!token) return errorResponse(401, "UNAUTHORIZED", "Sign in required");
+
     const url = new URL(req.url);
     const route = matchRoute(url.pathname);
     if (!route) return errorResponse(404, "NOT_FOUND", "Not found");
@@ -166,8 +179,6 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       });
     }
 
-    const token = bearerToken(req);
-    if (!token) return errorResponse(401, "UNAUTHORIZED", "Sign in required");
     const repo: CalculationsRepo = await deps.repoFor(token);
 
     switch (route.name) {
@@ -176,6 +187,9 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
         // Any client-sent "result" is ignored: the server always recomputes.
         const outcome = deps.evaluate(input.expression, { angle: input.angle });
         if (!outcome.ok) return json(422, { error: outcome.error });
+        // Postgres text can't hold NUL. The engine already rejects it (422 SYNTAX), so this
+        // is defence in depth: it only fires if the engine ever accepts one.
+        if (input.expression.includes("\u0000")) throw badRequest("expression must not contain NUL characters");
         const calculation = await repo.insert({ ...input, result: outcome.result });
         return json(201, { calculation });
       }
