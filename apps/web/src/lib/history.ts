@@ -21,13 +21,32 @@ export interface HistoryStore {
 }
 
 export const LOCAL_KEY = "calc.history.v1";
-const MAX_LOCAL = 200;
+/** Local history keeps the newest entries only, so it stays fast. */
+export const MAX_LOCAL = 500;
 const MAX_LABEL = 80;
 
 export const normalizeLabel = (label: string | null): string | null => {
   const t = (label ?? "").trim().slice(0, MAX_LABEL);
   return t === "" ? null : t;
 };
+
+const MODES = new Set(["standard", "scientific"]);
+const ANGLES = new Set(["deg", "rad"]);
+
+/** True for a well-formed history row. Anything else (null, {}, numbers, bad fields) is dropped. */
+export function isCalculation(v: unknown): v is Calculation {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.id === "string" && r.id.length > 0 &&
+    typeof r.expression === "string" && r.expression.length > 0 && r.expression.length <= 500 &&
+    typeof r.result === "string" && r.result.length > 0 && r.result.length <= 2000 &&
+    typeof r.mode === "string" && MODES.has(r.mode) &&
+    typeof r.angle === "string" && ANGLES.has(r.angle) &&
+    (r.label === null || (typeof r.label === "string" && r.label.length <= 80)) &&
+    typeof r.created_at === "string"
+  );
+}
 
 function newId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -43,7 +62,7 @@ export function createLocalStore(storage: Storage = window.localStorage): Histor
     try {
       const raw = storage.getItem(LOCAL_KEY);
       const parsed: unknown = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? (parsed as Calculation[]) : [];
+      return Array.isArray(parsed) ? parsed.filter(isCalculation).slice(0, MAX_LOCAL) : [];
     } catch {
       return [];
     }
@@ -96,7 +115,7 @@ export function createLocalStore(storage: Storage = window.localStorage): Histor
 export function createApiStore(client: ApiClient): HistoryStore {
   return {
     kind: "api",
-    list: () => client.history(50),
+    list: async () => (await client.history(50)).filter(isCalculation),
     save: (input) => client.calculate(input),
     updateLabel: (id, label) => client.updateLabel(id, normalizeLabel(label)),
     remove: (id) => client.remove(id),

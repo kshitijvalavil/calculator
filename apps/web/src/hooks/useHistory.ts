@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Calculation } from "../../../../contract/types";
-import type { HistoryStore, SaveInput, SaveOutcome } from "../lib/history";
+import { MAX_LOCAL, type HistoryStore, type SaveInput, type SaveOutcome } from "../lib/history";
 
 export function useHistory(store: HistoryStore) {
   const [items, setItems] = useState<Calculation[]>([]);
@@ -26,7 +26,7 @@ export function useHistory(store: HistoryStore) {
     try {
       const outcome = await storeRef.current.save(input);
       if (outcome.ok) {
-        setItems((prev) => [outcome.calculation, ...prev.filter((r) => r.id !== outcome.calculation.id)]);
+        setItems((prev) => [outcome.calculation, ...prev.filter((r) => r.id !== outcome.calculation.id)].slice(0, MAX_LOCAL));
         setNotice(null);
       }
       return outcome;

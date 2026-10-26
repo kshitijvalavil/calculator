@@ -352,20 +352,24 @@ button {
   color: var(--sci-fg);
 }
 .display__expr {
+  display: flex;
   min-height: 1.9rem;
   overflow-x: auto;
   overflow-y: hidden;
   white-space: pre;
-  text-align: right;
   font-family: var(--font-mono);
   font-size: 1.15rem;
   line-height: 1.9rem;
   color: var(--muted);
   scrollbar-width: none;
 }
-.display__expr::-webkit-scrollbar,
-.display__result-wrap::-webkit-scrollbar {
+.display__expr::-webkit-scrollbar {
   display: none;
+}
+/* An auto margin right-aligns short expressions but, unlike text-align:right,
+   never pushes overflow off the left edge where it couldn't be scrolled to. */
+.display__expr-inner {
+  margin-left: auto;
 }
 .tok--op {
   color: var(--op-fg);
@@ -384,16 +388,12 @@ button {
 .tok--op.tok--last {
   color: var(--op-fg);
 }
-.display__result-wrap {
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  text-align: right;
-  scrollbar-width: none;
-}
 .display__result {
-  display: inline-block;
+  display: block;
+  min-width: 0;
   min-height: 4rem;
+  overflow: hidden;
+  text-align: right;
   white-space: nowrap;
   font-weight: 700;
   letter-spacing: -0.035em;
@@ -411,6 +411,13 @@ button {
 .result--md { font-size: 2.2rem; }
 .result--sm { font-size: 1.75rem; }
 .result--xs { font-size: 1.5rem; letter-spacing: -0.02em; }
+.display__result[data-wrap="true"] {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  line-height: 1.2;
+  padding: 0.3rem 0;
+}
 .result--error {
   font-size: 1.5rem;
   letter-spacing: -0.01em;
@@ -843,4 +850,56 @@ button {
   .icon-btn:active {
     transform: none;
   }
+}
+
+/* ------------------------------------------------------------------ crash screen */
+.crash {
+  max-width: 420px;
+  margin: 15vh auto 0;
+  padding: 28px;
+  border-radius: var(--radius-card);
+  background: var(--card);
+  color: var(--text);
+  box-shadow: 18px 18px 40px -8px var(--sh-dark), -14px -14px 36px -8px var(--sh-light);
+}
+.crash__title {
+  margin: 0 0 8px;
+  font-size: 1.4rem;
+  font-weight: 800;
+}
+.crash p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.crash__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+.crash__btn {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--fn-bg);
+  color: var(--fn-fg);
+  font-weight: 700;
+}
+.crash__btn--primary {
+  background: var(--eq-bg);
+  color: var(--eq-fg);
+}
+
+.tape__more {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 8px;
+  border: 1px dashed var(--paper-line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--accent);
+  font: 700 0.85rem var(--font-ui);
 }

@@ -37,6 +37,7 @@ export type CalcAction =
   | { type: "serverResult"; expression: string; result: string }
   | { type: "loadExpression"; expression: string }
   | { type: "insertValue"; value: string }
+  | { type: "paste"; tokens: Token[] }
   | { type: "mode"; mode: Mode }
   | { type: "angle"; angle: AngleUnit };
 
@@ -92,6 +93,12 @@ export function calcReducer(state: CalcState, action: CalcAction): CalcState {
         return { ...state, evaluated: null, tokens: [...base, ...value] };
       }
       return { ...state, evaluated: null, tokens: value };
+    }
+    case "paste": {
+      if (!action.tokens.length) return state;
+      // Each pasted token goes through the same rules as a key press.
+      const tokens = action.tokens.reduce(applyKey, continueFrom(state, action.tokens[0]));
+      return { ...state, evaluated: null, tokens };
     }
     case "mode":
       return { ...state, mode: action.mode };

@@ -5,6 +5,7 @@ import {
   expandExponent,
   toExpression,
   toSegments,
+  sanitizePaste,
   toggleSign,
   tokenize,
   trimIncomplete,
@@ -100,5 +101,29 @@ describe("helpers", () => {
     expect(tokenize("3 * 4 / 2 - 1")).toEqual(["3", "×", "4", "÷", "2", "−", "1"]);
     expect(tokenize("√(16) + pi")).toEqual(["sqrt(", "1", "6", ")", "+", "π"]);
     expect(tokenize("2 $ 3")).toBeNull();
+  });
+});
+
+describe("sanitizePaste", () => {
+  const paste = (t: string) => toExpression(sanitizePaste(t).reduce(applyKey, [] as Token[]));
+
+  it("keeps calculator symbols and normalizes ASCII operators", () => {
+    expect(paste("12*3 - 4/2")).toBe("12 × 3 − 4 ÷ 2");
+    expect(paste("1,5 + 2")).toBe("1.5 + 2");
+  });
+
+  it("understands function names and constants", () => {
+    expect(paste("sqrt(16) + PI")).toBe("sqrt(16) + π");
+    expect(paste("sin 30")).toBe("sin(30");
+  });
+
+  it("strips HTML and anything that isn't calculator input", () => {
+    expect(paste("<img src=x onerror=alert(1)>2+3")).toBe("2 + 3");
+    expect(paste("<b>7</b> × 6 = ?")).toBe("7 × 6");
+    expect(paste("hi; drop table")).toBe("");
+  });
+
+  it("caps very long input", () => {
+    expect(sanitizePaste("1".repeat(5000)).length).toBe(500);
   });
 });

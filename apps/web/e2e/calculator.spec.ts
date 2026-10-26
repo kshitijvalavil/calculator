@@ -139,8 +139,8 @@ test.describe("display", () => {
   test("long numbers shrink and never overflow the card", async ({ page }) => {
     await page.keyboard.type("123456789*987654321*123456789=");
     const box = await page.locator(".display").boundingBox();
-    const wrap = await page.locator(".display__result-wrap").boundingBox();
-    expect(wrap!.x + wrap!.width).toBeLessThanOrEqual(box!.x + box!.width);
+    const out = await result(page).boundingBox();
+    expect(out!.x + out!.width).toBeLessThanOrEqual(box!.x + box!.width);
     await expect(result(page)).toHaveClass(/result--(sm|xs)/);
   });
 

@@ -206,3 +206,28 @@ export function tokenize(input: string): Token[] | null {
   }
   return out;
 }
+
+const PASTE_PART = /[a-zπ√]+|[0-9.,]|[+\-−*×÷/^%!()]/g;
+const PASTE_WORDS: Record<string, string> = {
+  sqrt: "sqrt(", "√": "sqrt(", sin: "sin(", cos: "cos(", tan: "tan(", ln: "ln(", log: "log(",
+  pi: "π", "π": "π", e: "e",
+};
+
+/**
+ * Turns pasted plain text into tokens: markup is stripped, only calculator symbols,
+ * function names and constants survive (other words are dropped whole), capped at 500 chars.
+ */
+export function sanitizePaste(text: string): Token[] {
+  const plain = text
+    .slice(0, 5000)
+    .replace(/<(script|style)\b[^]*?<\/\1\s*>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .toLowerCase();
+  const kept = (plain.match(PASTE_PART) ?? [])
+    .map((t) => (t === "," ? "." : /^[a-zπ√]/.test(t) ? (PASTE_WORDS[t] ?? "") : t))
+    .join("")
+    // a function name already followed by "(" shouldn't open two groups
+    .replace(/(sqrt|sin|cos|tan|ln|log)\(\(/g, "$1(")
+    .slice(0, 500);
+  return tokenize(kept) ?? [];
+}

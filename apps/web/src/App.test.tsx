@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Calculation } from "../../../contract/types";
 import { App } from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { PAGE_SIZE } from "./components/HistoryTape";
 import { createLocalStore, LOCAL_KEY, type HistoryStore } from "./lib/history";
 
 function renderApp(store: HistoryStore = createLocalStore()) {
@@ -287,5 +289,86 @@ describe("mobile history sheet", () => {
     } finally {
       window.matchMedia = mm;
     }
+  });
+});
+
+describe("paste", () => {
+  const paste = (text: string) => {
+    const event = new Event("paste", { bubbles: true, cancelable: true }) as Event & { clipboardData: unknown };
+    event.clipboardData = { getData: (type: string) => (type === "text/plain" ? text : "<b>html</b>") };
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+    return event;
+  };
+
+  it("inserts a sanitized plain-text expression", () => {
+    renderApp();
+    const ev = paste("12*3 + <script>alert(1)</script>4");
+    expect(ev.defaultPrevented).toBe(true);
+    expect(expression().textContent).toBe("12 × 3 + 4");
+    expect(document.querySelector("script")).toBeNull();
+  });
+
+  it("continues from the current expression", async () => {
+    const { user } = renderApp();
+    await user.keyboard("2+");
+    paste("3");
+    expect(expression().textContent).toBe("2 + 3");
+    expect(result().textContent).toBe("5");
+  });
+
+  it("ignores pastes into the label field", async () => {
+    const { user } = renderApp();
+    await user.keyboard("5=");
+    await user.click(screen.getByRole("button", { name: "Add label to 5" }));
+    const input = screen.getByRole("textbox", { name: "Label for 5" });
+    const event = new Event("paste", { bubbles: true, cancelable: true }) as Event & { clipboardData: unknown };
+    event.clipboardData = { getData: () => "9" };
+    act(() => {
+      input.dispatchEvent(event);
+    });
+    expect(expression().textContent).toBe("5 =");
+  });
+});
+
+describe("resilience", () => {
+  it.each([["[null]"], ["[{}]"], ["[1]"]])("renders with corrupted history %s", async (raw) => {
+    localStorage.setItem(LOCAL_KEY, raw);
+    renderApp();
+    expect(await screen.findByText("No calculations yet.")).toBeTruthy();
+    expect(result().textContent).toBe("0");
+  });
+
+  it("error boundary shows a recovery screen instead of a blank page", () => {
+    const Boom = () => {
+      throw new Error("boom");
+    };
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <ErrorBoundary>
+        <Boom />
+      </ErrorBoundary>,
+    );
+    expect(screen.getByRole("alert").textContent).toContain("Something went wrong");
+    expect(screen.getByRole("button", { name: "Reset and reload" })).toBeTruthy();
+    spy.mockRestore();
+  });
+
+  it(`renders only ${PAGE_SIZE} history rows at first`, async () => {
+    const rows = Array.from({ length: 500 }, (_, i) => ({
+      id: String(i),
+      expression: "2 + 3",
+      result: "5",
+      mode: "standard",
+      angle: "deg",
+      label: null,
+      created_at: new Date().toISOString(),
+    }));
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(rows));
+    const { user } = renderApp();
+    expect(await screen.findAllByTestId("history-item")).toHaveLength(PAGE_SIZE);
+    await user.click(screen.getByRole("button", { name: /Show 100 more of 400/ }));
+    expect(screen.getAllByTestId("history-item")).toHaveLength(PAGE_SIZE * 2);
   });
 });

@@ -22,6 +22,42 @@ export function resultSizeClass(text: string): string {
   return "result--xs";
 }
 
+/**
+ * Shrinks the result until it fits the display, then lets it wrap at the minimum size.
+ * Every digit stays visible; nothing is clipped or scrolled out of view.
+ */
+const MIN_RESULT_PX = 22;
+function useFitResult(text: string, sizeClass: string) {
+  const ref = useRef<HTMLOutputElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const fit = () => {
+      el.style.fontSize = "";
+      el.dataset.wrap = "false";
+      if (!el.clientWidth) return; // not laid out (e.g. jsdom)
+      let size = parseFloat(getComputedStyle(el).fontSize);
+      while (el.scrollWidth > el.clientWidth && size > MIN_RESULT_PX) {
+        size = Math.max(MIN_RESULT_PX, size - 2);
+        el.style.fontSize = `${size}px`;
+      }
+      if (el.scrollWidth > el.clientWidth) el.dataset.wrap = "true";
+    };
+    fit();
+    if (typeof ResizeObserver === "undefined") return;
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth !== width) {
+        width = el.clientWidth;
+        fit();
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text, sizeClass]);
+  return ref;
+}
+
 /** Keeps the end of a scrolling line in view and makes it focusable only while it overflows. */
 function useScrollToEnd<T extends HTMLElement>(dep: unknown) {
   const ref = useRef<T>(null);
@@ -54,7 +90,8 @@ export function Display({ segments, evaluated, preview, mode, angle }: Props) {
 
   const exprKey = segments.map((s) => s.text).join("") + (evaluated ? "=" : "");
   const expr = useScrollToEnd<HTMLDivElement>(exprKey);
-  const res = useScrollToEnd<HTMLDivElement>(resultText);
+  const sizeClass = state === "error" ? "result--error" : resultSizeClass(resultText);
+  const resultRef = useFitResult(resultText, sizeClass);
   const lastIndex = segments.length - 1;
 
   return (
@@ -72,6 +109,7 @@ export function Display({ segments, evaluated, preview, mode, angle }: Props) {
         aria-readonly="true"
         tabIndex={expr.overflowing ? 0 : -1}
       >
+        <span className="display__expr-inner">
         {segments.length === 0 ? (
           <span className="display__placeholder">&nbsp;</span>
         ) : (
@@ -91,24 +129,18 @@ export function Display({ segments, evaluated, preview, mode, angle }: Props) {
           )
         )}
         {evaluated && <span className="tok tok--equals"> =</span>}
+        </span>
       </div>
-      <div
-        ref={res.ref}
-        className="display__result-wrap"
-        tabIndex={res.overflowing ? 0 : -1}
-        aria-label={res.overflowing ? "Result, scroll to see all digits" : undefined}
-        role={res.overflowing ? "region" : undefined}
+      <output
+        ref={resultRef}
+        className={`display__result ${sizeClass}`}
+        data-testid="result"
+        data-state={state}
+        aria-live="polite"
+        aria-atomic="true"
       >
-        <output
-          className={`display__result ${state === "error" ? "result--error" : resultSizeClass(resultText)}`}
-          data-testid="result"
-          data-state={state}
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {resultText}
-        </output>
-      </div>
+        {resultText}
+      </output>
     </div>
   );
 }

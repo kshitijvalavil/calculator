@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Calculation } from "../../../../contract/types";
 import { CheckIcon, CloseIcon, ReceiptIcon, TagIcon, TrashIcon } from "./icons";
 
@@ -16,7 +16,10 @@ interface Props {
 
 const timeFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 
-function TapeItem({
+/** Rows rendered at first; more appear on request so long histories stay fast. */
+export const PAGE_SIZE = 100;
+
+const TapeItem = memo(function TapeItem({
   item,
   onReuseExpression,
   onReuseResult,
@@ -127,9 +130,11 @@ function TapeItem({
       </div>
     </li>
   );
-}
+});
 
 export function HistoryTape({ items, loading, storeKind, onClose, ...handlers }: Props) {
+  const [visible, setVisible] = useState(PAGE_SIZE);
+  const shown = items.length > visible ? items.slice(0, visible) : items;
   return (
     <section className="tape" aria-labelledby="history-title">
       <header className="tape__header">
@@ -156,10 +161,22 @@ export function HistoryTape({ items, loading, storeKind, onClose, ...handlers }:
           </div>
         ) : (
           <ol className="tape__list" aria-label="Past calculations">
-            {items.map((item) => (
-              <TapeItem key={item.id} item={item} {...handlers} />
+            {shown.map((item) => (
+              <TapeItem
+                key={item.id}
+                item={item}
+                onReuseExpression={handlers.onReuseExpression}
+                onReuseResult={handlers.onReuseResult}
+                onLabel={handlers.onLabel}
+                onDelete={handlers.onDelete}
+              />
             ))}
           </ol>
+        )}
+        {!loading && items.length > shown.length && (
+          <button type="button" className="tape__more" onClick={() => setVisible((v) => v + PAGE_SIZE)}>
+            Show {Math.min(PAGE_SIZE, items.length - shown.length)} more of {items.length - shown.length}
+          </button>
         )}
       </div>
     </section>

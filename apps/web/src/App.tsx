@@ -10,7 +10,7 @@ import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useTheme } from "./hooks/useTheme";
 import { calcReducer, computePreview, expressionToEvaluate, initialState } from "./lib/calculator";
 import { evaluate } from "./lib/engine";
-import { toSegments, type Token } from "./lib/expression";
+import { sanitizePaste, toSegments, type Token } from "./lib/expression";
 import type { HistoryStore } from "./lib/history";
 import { commandForKey, keyIdFor, type KeyCommand } from "./lib/keymap";
 
@@ -139,6 +139,19 @@ export function App({ store }: { store: HistoryStore }) {
   useEffect(() => {
     if (sheetOpen) sheetRef.current?.querySelector<HTMLElement>("button")?.focus();
   }, [sheetOpen]);
+
+  // Ctrl/Cmd+V of a plain-text expression. Text fields keep their own paste.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const target = e.target instanceof Element ? e.target : null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      const tokens = sanitizePaste(e.clipboardData?.getData("text/plain") ?? "");
+      e.preventDefault();
+      if (tokens.length) dispatch({ type: "paste", tokens });
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
 
   const closeSheet = useCallback(() => {
     setSheetOpen(false);
