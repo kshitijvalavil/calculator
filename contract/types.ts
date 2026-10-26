@@ -49,7 +49,7 @@ export interface CalculateRequest {
   angle?: AngleUnit;
 }
 /** 201 { calculation } on success (row saved); 422 { error } on a CalcError; 400 { error } on a bad body; 401 without auth. */
-export type CalculateResponse = { calculation: Calculation } | { error: CalcError | { code: "BAD_REQUEST" | "UNAUTHORIZED"; message: string } };
+export type CalculateResponse = { calculation: Calculation } | { error: CalcError | { code: "BAD_REQUEST" | "UNAUTHORIZED" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "INTERNAL"; message: string } };
 
 /** GET /history?limit=50 → 200 { calculations } newest first. limit 1..200, default 50. */
 export interface HistoryResponse {

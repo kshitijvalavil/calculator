@@ -5,14 +5,13 @@ import {
   RepoError,
   type CalculationsRepo,
   type NewCalculation,
-  type RepoFactory,
 } from "./repo.ts";
 
 export interface SupabaseRepoOptions {
   url: string;
   anonKey: string;
   /** Injectable for tests; defaults to supabase-js `createClient`. */
-  createClient?: (url: string, key: string, options: Parameters<typeof createClient>[2]) => SupabaseClient;
+  createClient?: (url: string, key: string, options: Parameters<typeof createClient>[2]) => SupabaseClient<any, any, any>;
 }
 
 interface PostgrestLikeError {
@@ -49,7 +48,7 @@ function toCalculation(row: Record<string, unknown>): Calculation {
  * result, mode and angle (id, user_id, created_at default in the DB), and
  * updates send only label.
  */
-export function createSupabaseRepoFactory(options: SupabaseRepoOptions): RepoFactory {
+export function createSupabaseRepoFactory(options: SupabaseRepoOptions): (token: string) => CalculationsRepo {
   const make = options.createClient ?? createClient;
   return (token: string): CalculationsRepo => {
     const client = make(options.url, options.anonKey, {
@@ -80,10 +79,11 @@ export function createSupabaseRepoFactory(options: SupabaseRepoOptions): RepoFac
         const { data, error, status } = await table()
           .update({ label })
           .eq("id", id)
-          .select(CALCULATION_COLUMNS)
-          .maybeSingle();
+          .select(CALCULATION_COLUMNS);
         if (error) throw toRepoError(error, status);
-        return data ? toCalculation(data as Record<string, unknown>) : null;
+        // RLS hides other users' rows, so "not mine" comes back as zero rows.
+        const rows = (data ?? []) as Record<string, unknown>[];
+        return rows[0] ? toCalculation(rows[0]) : null;
       },
       async delete(id: string) {
         const { data, error, status } = await table().delete().eq("id", id).select("id");

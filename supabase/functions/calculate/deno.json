@@ -1,0 +1,8 @@
+{
+  "imports": {
+    "@calc/api": "../../../packages/calc-api/src/index.ts",
+    "@calc/engine": "../../../packages/calc-engine/src/index.ts",
+    "decimal.js": "npm:decimal.js@10.6.0",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.50.0"
+  }
+}
