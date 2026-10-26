@@ -9,6 +9,7 @@ Written by the Manager from the approved research brief. All three engineers wor
 | **Byte Vader** (back-end) | `packages/calc-engine/`, `packages/calc-api/`, `supabase/functions/` | everything else |
 | **Tabledore** (database) | `supabase/migrations/`, `supabase/tests/`, `scripts/test-db.sh` | everything else |
 | **Sir Pixelot** (front-end) | `apps/web/` | everything else |
+| **Sherlock Bugs** (testing) | `qa/` | all product code: it reports bugs and never fixes them |
 | **Manager** | `contract/`, root `package.json`, CI, README | |
 
 Dependencies are already installed. Don't add new ones unless you have to. If you do, install only into your own workspace (`npm install <pkg>@<exact version> -w <workspace>`).
