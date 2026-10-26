@@ -1,0 +1,11 @@
+{
+  "name": "@calc/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "test": "vitest run", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@calc/engine": "0.1.0", "@supabase/supabase-js": "2.50.0" },
+  "devDependencies": { "vitest": "3.2.4", "typescript": "5.8.3" }
+}

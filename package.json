@@ -1,0 +1,17 @@
+{
+  "name": "calculator",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "test": "npm run test:engine && npm run test:api && npm run test:db && npm run test:web",
+    "test:engine": "npm test -w @calc/engine",
+    "test:api": "npm test -w @calc/api",
+    "test:db": "bash scripts/test-db.sh",
+    "test:web": "npm test -w @calc/web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3"
+  }
+}
