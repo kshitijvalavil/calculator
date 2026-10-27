@@ -105,7 +105,12 @@ describe("helpers", () => {
 });
 
 describe("sanitizePaste", () => {
-  const paste = (t: string) => toExpression(sanitizePaste(t).reduce(applyKey, [] as Token[]));
+  const tokensOf = (t: string) => {
+    const r = sanitizePaste(t);
+    if (!r.ok) throw new Error("rejected");
+    return r.tokens;
+  };
+  const paste = (t: string) => toExpression(tokensOf(t).reduce(applyKey, [] as Token[]));
 
   it("keeps calculator symbols and normalizes ASCII operators", () => {
     expect(paste("12*3 - 4/2")).toBe("12 × 3 − 4 ÷ 2");
@@ -123,7 +128,22 @@ describe("sanitizePaste", () => {
     expect(paste("hi; drop table")).toBe("");
   });
 
-  it("caps very long input", () => {
-    expect(sanitizePaste("1".repeat(5000)).length).toBe(500);
+  it("rejects input over 500 characters instead of truncating it (N5)", () => {
+    expect(sanitizePaste("1+".repeat(400) + "1")).toEqual({ ok: false, reason: "too-long" });
+    expect(sanitizePaste("1".repeat(500)).ok).toBe(true);
+  });
+
+  it("keeps the value of numbers in e-notation (N2)", () => {
+    expect(paste("1e+24")).toBe("(1 × 10 ^ 24)");
+    expect(paste("2.5e-8")).toBe("(2.5 × 10 ^ −8)");
+    expect(paste("1E3")).toBe("(1 × 10 ^ 3)");
+    expect(paste("2 × 1e3")).toBe("2 × (1 × 10 ^ 3)");
+    // A lone constant e is still Euler's number.
+    expect(paste("2e")).toBe("2 × e");
+  });
+
+  it("converts full-width digits and operators (N6)", () => {
+    expect(paste("１２＋３－４×５÷６")).toBe("12 + 3 − 4 × 5 ÷ 6");
+    expect(paste("（１．５）＊２／３")).toBe("(1.5) × 2 ÷ 3");
   });
 });

@@ -10,6 +10,8 @@ type Row = { expression: string; angle?: string; result?: string; error?: string
 const extra: Row[] = [
   { expression: "2 + 3", result: "5" },
   { expression: "5 + 1", result: "6" },
+  { expression: "3 + 4", result: "7" },
+  { expression: "1 + 1", result: "2" },
   { expression: "5 × 2", result: "10" },
   { expression: "12 + 7", result: "19" },
   { expression: "2 × (3 + 4)", result: "14" },

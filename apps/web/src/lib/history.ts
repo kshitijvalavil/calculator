@@ -1,6 +1,7 @@
 import type { AngleUnit, CalcError, Calculation, Mode } from "../../../../contract/types";
 import { createApiClient, type ApiClient } from "./api";
 import { evaluate } from "./engine";
+import { browserStorage, createMemoryStorage } from "./storage";
 
 export interface SaveInput {
   expression: string;
@@ -13,6 +14,8 @@ export type SaveOutcome = { ok: true; calculation: Calculation } | { ok: false; 
 /** Where saved calculations live. Same UI either way. */
 export interface HistoryStore {
   readonly kind: "local" | "api";
+  /** False when browser storage is blocked and local history lives in memory only. */
+  readonly persistent?: boolean;
   list(): Promise<Calculation[]>;
   /** Evaluates and saves. In API mode the server recomputes and its result is returned. */
   save(input: SaveInput): Promise<SaveOutcome>;
@@ -25,8 +28,13 @@ export const LOCAL_KEY = "calc.history.v1";
 export const MAX_LOCAL = 500;
 const MAX_LABEL = 80;
 
+/** Labels are capped at 80 characters counted as code points (emoji count once), like the DB. */
+export const clampLabel = (label: string): string => Array.from(label).slice(0, MAX_LABEL).join("");
+export const labelLength = (label: string): number => Array.from(label).length;
+export const MAX_LABEL_CHARS = MAX_LABEL;
+
 export const normalizeLabel = (label: string | null): string | null => {
-  const t = (label ?? "").trim().slice(0, MAX_LABEL);
+  const t = clampLabel((label ?? "").trim());
   return t === "" ? null : t;
 };
 
@@ -43,13 +51,17 @@ export function isCalculation(v: unknown): v is Calculation {
     typeof r.result === "string" && r.result.length > 0 && r.result.length <= 2000 &&
     typeof r.mode === "string" && MODES.has(r.mode) &&
     typeof r.angle === "string" && ANGLES.has(r.angle) &&
-    (r.label === null || (typeof r.label === "string" && r.label.length <= 80)) &&
+    (r.label === null || (typeof r.label === "string" && Array.from(r.label).length <= 80)) &&
     typeof r.created_at === "string"
   );
 }
 
 function newId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  } catch {
+    /* non-secure context */
+  }
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
     return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
@@ -57,10 +69,12 @@ function newId(): string {
 }
 
 /** localStorage-backed history, used when Supabase isn't configured. */
-export function createLocalStore(storage: Storage = window.localStorage): HistoryStore {
+export function createLocalStore(storage: Storage | null = browserStorage()): HistoryStore {
+  const persistent = storage !== null;
+  const store = storage ?? createMemoryStorage();
   const read = (): Calculation[] => {
     try {
-      const raw = storage.getItem(LOCAL_KEY);
+      const raw = store.getItem(LOCAL_KEY);
       const parsed: unknown = raw ? JSON.parse(raw) : [];
       return Array.isArray(parsed) ? parsed.filter(isCalculation).slice(0, MAX_LOCAL) : [];
     } catch {
@@ -69,7 +83,7 @@ export function createLocalStore(storage: Storage = window.localStorage): Histor
   };
   const write = (rows: Calculation[]) => {
     try {
-      storage.setItem(LOCAL_KEY, JSON.stringify(rows.slice(0, MAX_LOCAL)));
+      store.setItem(LOCAL_KEY, JSON.stringify(rows.slice(0, MAX_LOCAL)));
     } catch {
       /* storage full or blocked: history just won't persist */
     }
@@ -82,6 +96,7 @@ export function createLocalStore(storage: Storage = window.localStorage): Histor
 
   return {
     kind: "local",
+    persistent,
     async list() {
       return read();
     },
@@ -127,7 +142,14 @@ export function supabaseTokenProvider(url: string, anonKey: string) {
   let clientPromise: Promise<import("@supabase/supabase-js").SupabaseClient> | null = null;
   const getClient = () =>
     (clientPromise ??= import("@supabase/supabase-js").then(({ createClient }) =>
-      createClient(url, anonKey, { auth: { persistSession: true, autoRefreshToken: true } }),
+      createClient(url, anonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          // Blocked storage keeps the anonymous session in memory instead of crashing.
+          storage: browserStorage() ?? createMemoryStorage(),
+        },
+      }),
     ));
 
   let pending: Promise<string> | null = null;

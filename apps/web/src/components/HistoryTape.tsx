@@ -1,11 +1,14 @@
 import { memo, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Calculation } from "../../../../contract/types";
+import { clampLabel, labelLength, MAX_LABEL_CHARS } from "../lib/history";
 import { CheckIcon, CloseIcon, ReceiptIcon, TagIcon, TrashIcon } from "./icons";
 
 interface Props {
   items: Calculation[];
   loading: boolean;
   storeKind: "local" | "api";
+  /** False when browser storage is blocked and history is kept in memory only. */
+  persistent?: boolean;
   onReuseExpression: (c: Calculation) => void;
   onReuseResult: (c: Calculation) => void;
   onLabel: (id: string, label: string | null) => void;
@@ -30,6 +33,7 @@ const TapeItem = memo(function TapeItem({
   const [draft, setDraft] = useState(item.label ?? "");
   const inputRef = useRef<HTMLInputElement>(null);
   const editBtnRef = useRef<HTMLButtonElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
@@ -38,8 +42,11 @@ const TapeItem = memo(function TapeItem({
   const finish = (save: boolean) => {
     if (save) onLabel(item.id, draft);
     else setDraft(item.label ?? "");
+    // Hand the keyboard back to the calculator (or the sheet it lives in), so the next
+    // Enter evaluates instead of reopening this editor.
+    const sheet = formRef.current?.closest<HTMLElement>("[role=dialog]");
     setEditing(false);
-    requestAnimationFrame(() => editBtnRef.current?.focus());
+    requestAnimationFrame(() => (sheet ?? document.getElementById(CALC_FOCUS_ID))?.focus());
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -55,6 +62,7 @@ const TapeItem = memo(function TapeItem({
     <li className="tape__item" data-testid="history-item">
       {editing ? (
         <form
+          ref={formRef}
           className="tape__label-form"
           onSubmit={(e) => {
             e.preventDefault();
@@ -65,12 +73,15 @@ const TapeItem = memo(function TapeItem({
             ref={inputRef}
             className="tape__label-input"
             value={draft}
-            maxLength={80}
             placeholder="Add a label"
             aria-label={`Label for ${item.expression}`}
-            onChange={(e) => setDraft(e.target.value)}
+            aria-describedby={`label-count-${item.id}`}
+            onChange={(e) => setDraft(clampLabel(e.target.value))}
             onKeyDown={onKeyDown}
           />
+          <span className="tape__count" id={`label-count-${item.id}`}>
+            {labelLength(draft)}/{MAX_LABEL_CHARS}
+          </span>
           <button type="submit" className="icon-btn icon-btn--sm" aria-label="Save label">
             <CheckIcon />
           </button>
@@ -132,7 +143,10 @@ const TapeItem = memo(function TapeItem({
   );
 });
 
-export function HistoryTape({ items, loading, storeKind, onClose, ...handlers }: Props) {
+/** Element that takes keyboard focus when control returns to the calculator. */
+export const CALC_FOCUS_ID = "calc-expression";
+
+export function HistoryTape({ items, loading, storeKind, persistent = true, onClose, ...handlers }: Props) {
   const [visible, setVisible] = useState(PAGE_SIZE);
   const shown = items.length > visible ? items.slice(0, visible) : items;
   return (
@@ -142,7 +156,13 @@ export function HistoryTape({ items, loading, storeKind, onClose, ...handlers }:
           <h2 id="history-title" className="tape__title">
             History
           </h2>
-          <p className="tape__sub">{storeKind === "api" ? "Synced to your account" : "Saved on this device"}</p>
+          <p className="tape__sub">
+            {storeKind === "api"
+              ? "Synced to your account"
+              : persistent
+                ? "Saved on this device"
+                : "Storage is blocked, so history lasts until you close this tab"}
+          </p>
         </div>
         {onClose && (
           <button type="button" className="icon-btn" aria-label="Close history" onClick={onClose}>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { readItem, writeItem } from "../lib/storage";
 
 export type Theme = "light" | "dark";
 const KEY = "calc.theme";
@@ -9,12 +10,8 @@ function systemTheme(): Theme {
 }
 
 function storedTheme(): Theme | null {
-  try {
-    const v = localStorage.getItem(KEY);
-    return v === "light" || v === "dark" ? v : null;
-  } catch {
-    return null;
-  }
+  const v = readItem(KEY);
+  return v === "light" || v === "dark" ? v : null;
 }
 
 /** Follows the system preference until the user picks a theme, then remembers it. */
@@ -40,11 +37,7 @@ export function useTheme() {
   const toggle = useCallback(() => {
     const next: Theme = theme === "dark" ? "light" : "dark";
     setOverride(next);
-    try {
-      localStorage.setItem(KEY, next);
-    } catch {
-      /* not persisted */
-    }
+    writeItem(KEY, next);
   }, [theme]);
 
   return { theme, toggle };

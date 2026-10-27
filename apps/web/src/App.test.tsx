@@ -6,6 +6,7 @@ import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { PAGE_SIZE } from "./components/HistoryTape";
 import { createLocalStore, LOCAL_KEY, type HistoryStore } from "./lib/history";
+import { resetStorageProbe } from "./lib/storage";
 
 function renderApp(store: HistoryStore = createLocalStore()) {
   const user = userEvent.setup();
@@ -370,5 +371,111 @@ describe("resilience", () => {
     expect(await screen.findAllByTestId("history-item")).toHaveLength(PAGE_SIZE);
     await user.click(screen.getByRole("button", { name: /Show 100 more of 400/ }));
     expect(screen.getAllByTestId("history-item")).toHaveLength(PAGE_SIZE * 2);
+  });
+});
+
+describe("round 2 regressions", () => {
+  it("N1: after saving a label with the mouse, Enter evaluates and keys go to the calculator", async () => {
+    const { user } = renderApp();
+    await user.keyboard("1+1{Enter}");
+    await user.click(await screen.findByRole("button", { name: "Add label to 1 + 1" }));
+    await user.keyboard("groceries");
+    await user.click(screen.getByRole("button", { name: "Save label" }));
+    expect((await screen.findByTestId("history-label")).textContent).toBe("groceries");
+    await waitFor(() => expect(document.activeElement).toBe(expression()));
+    await user.keyboard("2+3{Enter}");
+    expect(result().textContent).toBe("5");
+    expect(screen.queryByRole("textbox", { name: /Label for/ })).toBeNull();
+    const stored = JSON.parse(localStorage.getItem(LOCAL_KEY)!) as Calculation[];
+    expect(stored.map((r) => `${r.expression}=${r.result} [${r.label}]`)).toEqual(["2 + 3=5 [null]", "1 + 1=2 [groceries]"]);
+  });
+
+  it("N1: cancelling a label also returns focus to the calculator", async () => {
+    const { user } = renderApp();
+    await user.keyboard("5=");
+    await user.click(await screen.findByRole("button", { name: "Add label to 5" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(expression()));
+  });
+
+  it("N3: works with history in memory when localStorage access throws", async () => {
+    const desc = Object.getOwnPropertyDescriptor(window, "localStorage")!;
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("denied", "SecurityError");
+      },
+    });
+    resetStorageProbe();
+    try {
+      const { user } = renderApp(createLocalStore());
+      expect(screen.getByText(/Storage is blocked/)).toBeTruthy();
+      await user.keyboard("3+4{Enter}");
+      expect(result().textContent).toBe("7");
+      expect(await screen.findAllByTestId("history-item")).toHaveLength(1);
+      await user.click(screen.getByTestId("theme-toggle"));
+      await user.click(screen.getByRole("button", { name: "Scientific" }));
+    } finally {
+      Object.defineProperty(window, "localStorage", desc);
+      resetStorageProbe();
+    }
+  });
+
+  it("N4: a label holds 80 emoji (code points, not UTF-16 units)", async () => {
+    const { user } = renderApp();
+    await user.keyboard("5=");
+    await user.click(await screen.findByRole("button", { name: "Add label to 5" }));
+    const input = screen.getByRole("textbox", { name: "Label for 5" });
+    fireEvent.change(input, { target: { value: "😀".repeat(85) } });
+    expect(Array.from((input as HTMLInputElement).value)).toHaveLength(80);
+    expect(screen.getByText("80/80")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Save label" }));
+    const label = (await screen.findByTestId("history-label")).textContent!;
+    expect(Array.from(label)).toHaveLength(80);
+    expect((JSON.parse(localStorage.getItem(LOCAL_KEY)!) as Calculation[])[0].label).toBe("😀".repeat(80));
+  });
+
+  it("N5: an over-long paste is rejected with a visible message", () => {
+    renderApp();
+    const event = new Event("paste", { bubbles: true, cancelable: true }) as Event & { clipboardData: unknown };
+    event.clipboardData = { getData: () => "1+".repeat(400) + "1" };
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+    expect(screen.getByRole("alert").textContent).toContain("That's too long to paste, max 500 characters");
+    expect(expression().textContent?.trim()).toBe("");
+  });
+
+  it("N6: the error boundary moves focus to its heading", () => {
+    const Boom = () => {
+      throw new Error("boom");
+    };
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <ErrorBoundary>
+        <Boom />
+      </ErrorBoundary>,
+    );
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Something went wrong" }));
+    spy.mockRestore();
+  });
+
+  it("error boundary Try again remounts the app once the fault is gone", async () => {
+    let fail = true;
+    const Flaky = () => {
+      if (fail) throw new Error("boom");
+      return <p>recovered</p>;
+    };
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const user = userEvent.setup();
+    render(
+      <ErrorBoundary>
+        <Flaky />
+      </ErrorBoundary>,
+    );
+    fail = false;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(screen.getByText("recovered")).toBeTruthy();
+    spy.mockRestore();
   });
 });

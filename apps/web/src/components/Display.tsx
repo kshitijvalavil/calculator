@@ -102,6 +102,7 @@ export function Display({ segments, evaluated, preview, mode, angle }: Props) {
       </div>
       <div
         ref={expr.ref}
+        id="calc-expression"
         className="display__expr"
         data-testid="expression"
         aria-label="Expression"

@@ -10,8 +10,9 @@ import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useTheme } from "./hooks/useTheme";
 import { calcReducer, computePreview, expressionToEvaluate, initialState } from "./lib/calculator";
 import { evaluate } from "./lib/engine";
-import { sanitizePaste, toSegments, type Token } from "./lib/expression";
+import { MAX_PASTE, sanitizePaste, toSegments, type Token } from "./lib/expression";
 import type { HistoryStore } from "./lib/history";
+import { readItem, writeItem } from "./lib/storage";
 import { commandForKey, keyIdFor, type KeyCommand } from "./lib/keymap";
 
 const MODE_KEY = "calc.mode";
@@ -31,11 +32,7 @@ if (typeof window !== "undefined") {
 }
 
 function storedMode() {
-  try {
-    return localStorage.getItem(MODE_KEY) === "scientific" ? "scientific" : "standard";
-  } catch {
-    return "standard";
-  }
+  return readItem(MODE_KEY) === "scientific" ? "scientific" : "standard";
 }
 
 export function App({ store }: { store: HistoryStore }) {
@@ -44,6 +41,7 @@ export function App({ store }: { store: HistoryStore }) {
   const { theme, toggle: toggleTheme } = useTheme();
   const wide = useMediaQuery("(min-width: 1024px)");
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [pasteNotice, setPasteNotice] = useState<string | null>(null);
   const [pressedKey, setPressedKey] = useState<string | null>(null);
   const pressTimer = useRef<number | undefined>(undefined);
   const historyBtnRef = useRef<HTMLButtonElement>(null);
@@ -54,11 +52,7 @@ export function App({ store }: { store: HistoryStore }) {
   const segments = useMemo(() => toSegments(state.tokens), [state.tokens]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(MODE_KEY, state.mode);
-    } catch {
-      /* not persisted */
-    }
+    writeItem(MODE_KEY, state.mode);
   }, [state.mode]);
 
   const equals = useCallback(async () => {
@@ -103,6 +97,7 @@ export function App({ store }: { store: HistoryStore }) {
       else if (cmd.type === "back") handlers.onBack();
       else handlers.onClear();
       flash(keyIdFor(cmd));
+      setPasteNotice(null);
     },
     [handlers, flash],
   );
@@ -145,9 +140,14 @@ export function App({ store }: { store: HistoryStore }) {
     const onPaste = (e: ClipboardEvent) => {
       const target = e.target instanceof Element ? e.target : null;
       if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
-      const tokens = sanitizePaste(e.clipboardData?.getData("text/plain") ?? "");
+      const pasted = sanitizePaste(e.clipboardData?.getData("text/plain") ?? "");
       e.preventDefault();
-      if (tokens.length) dispatch({ type: "paste", tokens });
+      if (!pasted.ok) {
+        setPasteNotice(`That's too long to paste, max ${MAX_PASTE} characters`);
+        return;
+      }
+      setPasteNotice(null);
+      if (pasted.tokens.length) dispatch({ type: "paste", tokens: pasted.tokens });
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
@@ -183,6 +183,7 @@ export function App({ store }: { store: HistoryStore }) {
       items={history.items}
       loading={history.loading}
       storeKind={store.kind}
+      persistent={store.persistent !== false}
       onReuseExpression={reuseExpression}
       onReuseResult={reuseResult}
       onLabel={history.updateLabel}
@@ -268,10 +269,14 @@ export function App({ store }: { store: HistoryStore }) {
             <Keypad handlers={handlers} pressedKey={pressedKey} />
           </div>
 
-          {history.notice && (
+          {(pasteNotice ?? history.notice) && (
             <p className="notice" role="alert">
-              {history.notice}
-              <button type="button" className="notice__dismiss" onClick={history.dismissNotice}>
+              {pasteNotice ?? history.notice}
+              <button
+                type="button"
+                className="notice__dismiss"
+                onClick={() => (pasteNotice ? setPasteNotice(null) : history.dismissNotice())}
+              >
                 Dismiss
               </button>
             </p>
@@ -284,7 +289,7 @@ export function App({ store }: { store: HistoryStore }) {
       {!wide && sheetOpen && (
         <div className="sheet" id="history-sheet">
           <div className="sheet__backdrop" onClick={closeSheet} aria-hidden="true" />
-          <div ref={sheetRef} className="sheet__panel" role="dialog" aria-modal="true" aria-labelledby="history-title">
+          <div ref={sheetRef} className="sheet__panel" tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="history-title">
             {tape}
           </div>
         </div>

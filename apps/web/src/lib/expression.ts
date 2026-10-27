@@ -213,21 +213,35 @@ const PASTE_WORDS: Record<string, string> = {
   pi: "π", "π": "π", e: "e",
 };
 
+export const MAX_PASTE = 500;
+
+export type PasteResult = { ok: true; tokens: Token[] } | { ok: false; reason: "too-long" };
+
+/** "1e+24" → "(1*10^24)", "2.5e-8" → "(2.5*10^-8)": the engine has no e-notation input. */
+function expandScientific(text: string): string {
+  return text.replace(/(\d+(?:\.\d+)?)e([+-]?)(\d+)/gi, (_, m: string, sign: string, exp: string) =>
+    `(${m}*10^${sign === "-" ? "-" : ""}${exp})`,
+  );
+}
+
 /**
- * Turns pasted plain text into tokens: markup is stripped, only calculator symbols,
- * function names and constants survive (other words are dropped whole), capped at 500 chars.
+ * Turns pasted plain text into tokens. Full-width characters are normalized, numbers in
+ * e-notation keep their value, markup is stripped, and only calculator symbols, function
+ * names and constants survive (other words are dropped whole). Text over 500 characters is
+ * rejected rather than silently cut.
  */
-export function sanitizePaste(text: string): Token[] {
-  const plain = text
-    .slice(0, 5000)
+export function sanitizePaste(text: string): PasteResult {
+  const raw = text.normalize("NFKC").trim();
+  if (raw.length > MAX_PASTE) return { ok: false, reason: "too-long" };
+  const plain = raw
     .replace(/<(script|style)\b[^]*?<\/\1\s*>/gi, " ")
     .replace(/<[^>]*>/g, " ")
-    .toLowerCase();
-  const kept = (plain.match(PASTE_PART) ?? [])
+    .replace(/,(?=\d)/g, ".");
+  const kept = (expandScientific(plain).toLowerCase().match(PASTE_PART) ?? [])
     .map((t) => (t === "," ? "." : /^[a-zπ√]/.test(t) ? (PASTE_WORDS[t] ?? "") : t))
     .join("")
     // a function name already followed by "(" shouldn't open two groups
-    .replace(/(sqrt|sin|cos|tan|ln|log)\(\(/g, "$1(")
-    .slice(0, 500);
-  return tokenize(kept) ?? [];
+    .replace(/(sqrt|sin|cos|tan|ln|log)\(\(/g, "$1(");
+  if (kept.length > MAX_PASTE) return { ok: false, reason: "too-long" };
+  return { ok: true, tokens: tokenize(kept) ?? [] };
 }

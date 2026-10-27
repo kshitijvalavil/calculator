@@ -903,3 +903,23 @@ button {
   color: var(--accent);
   font: 700 0.85rem var(--font-ui);
 }
+.crash__title:focus {
+  outline: none;
+}
+.crash__title:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+.tape__label-input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+.tape__count {
+  font: 600 0.72rem var(--font-ui);
+  color: var(--paper-muted);
+  white-space: nowrap;
+}
+.sheet__panel:focus {
+  outline: none;
+}
