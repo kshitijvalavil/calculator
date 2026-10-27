@@ -1,0 +1,27 @@
+[
+  {
+    "name": "label: Enter after mouse-saving a label evaluates the expression",
+    "problem": "Enter re-opened the label editor (focus was on \"Label for 1 + 1\")",
+    "screenshot": "qa/e2e/bugs/r2-label-enter-after-mouse-saving-a-label-evaluates-the-expression.png"
+  },
+  {
+    "name": "label: hostile and long labels",
+    "problem": "80-emoji label truncated to 40 emoji (input maxlength counts UTF-16 units; contract/DB allow 80 chars)",
+    "screenshot": "qa/e2e/bugs/r2-label-hostile-and-long-labels.png"
+  },
+  {
+    "name": "error boundary: localStorage getItem throws (blocked storage)",
+    "problem": "white screen / reset screen when localStorage access throws (private mode, blocked cookies) | denied",
+    "screenshot": "qa/e2e/bugs/r2-error-boundary-localstorage-getitem-throws-blocked-storage-.png"
+  },
+  {
+    "name": "paste: the app's own exponential result",
+    "problem": "pasting \"1e+24\" becomes \"1 × e + 24\" = \"26.718281828459045235\" (silently wrong value); pasting \"2.5e-8\" becomes \"2.5 × e − 8\" = \"-1.2042954288523869116\" (silently wrong value); pasting \"1e3\" becomes \"1 × e × 3\" = \"8.1548454853771357061\" (silently wrong value)",
+    "screenshot": "qa/e2e/bugs/r2-paste-the-app-s-own-exponential-result.png"
+  },
+  {
+    "name": "paste: long text",
+    "problem": "801-char paste silently truncated to 500 chars and shows 250 as if it were the answer (full sum is 401)",
+    "screenshot": "qa/e2e/bugs/r2-paste-long-text.png"
+  }
+]
