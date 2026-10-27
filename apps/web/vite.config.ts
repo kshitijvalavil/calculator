@@ -8,6 +8,8 @@ const engineMock = fileURLToPath(new URL("./src/test/engineMock.ts", import.meta
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // GitHub Pages serves the app from /<repo>/, so the deploy workflow sets VITE_BASE.
+  base: process.env.VITE_BASE ?? "/",
   // Separate cache dirs let the local-mode and API-mode e2e servers run side by side.
   cacheDir: process.env.CALC_VITE_CACHE ?? "node_modules/.vite",
   server: { strictPort: true },
