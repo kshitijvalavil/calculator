@@ -1,0 +1,149 @@
+import { describe, expect, it } from "vitest";
+import {
+  applyKey,
+  autoClose,
+  expandExponent,
+  toExpression,
+  toSegments,
+  sanitizePaste,
+  toggleSign,
+  tokenize,
+  trimIncomplete,
+  type Token,
+} from "./expression";
+
+const type = (keys: Token[], start: Token[] = []) => keys.reduce(applyKey, start);
+const expr = (keys: Token[]) => toExpression(type(keys));
+
+describe("applyKey", () => {
+  it("builds a spaced, engine-ready expression", () => {
+    expect(expr(["1", "2", "+", "3", "×", "4"])).toBe("12 + 3 × 4");
+  });
+
+  it("replaces a lone leading zero but keeps decimals", () => {
+    expect(expr(["0", "5"])).toBe("5");
+    expect(expr(["0", ".", "5"])).toBe("0.5");
+    expect(expr(["1", "0"])).toBe("10");
+  });
+
+  it("allows only one decimal point per number and prefixes a bare point with 0", () => {
+    expect(expr([".", "5", ".", "2"])).toBe("0.52");
+    expect(expr(["1", "+", "."])).toBe("1 + 0.");
+  });
+
+  it("replaces a trailing operator instead of stacking them", () => {
+    expect(expr(["2", "+", "×", "3"])).toBe("2 × 3");
+    expect(expr(["2", "×", "−", "+"])).toBe("2 +");
+  });
+
+  it("supports unary minus at the start, after operators and after (", () => {
+    expect(expr(["−", "5", "+", "3"])).toBe("−5 + 3");
+    expect(expr(["2", "×", "−", "3"])).toBe("2 × −3");
+    expect(expr(["(", "−", "2", ")"])).toBe("(−2)");
+    expect(expr(["−", "−"])).toBe("−");
+  });
+
+  it("ignores binary operators with nothing to the left", () => {
+    expect(type(["×"])).toEqual([]);
+    expect(expr(["(", "+"])).toBe("(");
+  });
+
+  it("only closes parentheses that are open, after a value", () => {
+    expect(expr([")"])).toBe("");
+    expect(expr(["(", ")"])).toBe("(");
+    expect(expr(["(", "2", ")", ")"])).toBe("(2)");
+  });
+
+  it("inserts × before groups, functions and constants that follow a value", () => {
+    expect(expr(["2", "("])).toBe("2 × (");
+    expect(expr(["2", "π"])).toBe("2 × π");
+    expect(expr(["π", "3"])).toBe("π × 3");
+    expect(expr(["5", "!", "sqrt("])).toBe("5! × sqrt(");
+  });
+
+  it("accepts postfix % and ! only after a value", () => {
+    expect(expr(["%"])).toBe("");
+    expect(expr(["5", "0", "%"])).toBe("50%");
+  });
+});
+
+describe("helpers", () => {
+  it("auto-closes unmatched parentheses", () => {
+    expect(toExpression(autoClose(type(["sqrt(", "(", "2"])))).toBe("sqrt((2))");
+  });
+
+  it("trims trailing operators and empty groups for the preview", () => {
+    expect(toExpression(trimIncomplete(type(["2", "+", "3", "×"])))).toBe("2 + 3");
+    expect(toExpression(trimIncomplete(type(["2", "×", "sin("])))).toBe("2");
+  });
+
+  it("toggles the sign of the trailing number", () => {
+    const t = type(["5", "−", "3"]);
+    expect(toExpression(toggleSign(t))).toBe("5 − −3");
+    expect(toExpression(toggleSign(toggleSign(t)))).toBe("5 − 3");
+    expect(toExpression(toggleSign([]))).toBe("−");
+  });
+
+  it("groups digits into one segment and shows sqrt as √", () => {
+    const segs = toSegments(type(["1", "2", "+", "sqrt(", "9"]));
+    expect(segs.map((s) => s.text)).toEqual(["12", " + ", "√(", "9"]);
+  });
+
+  it("expands exponent notation so results can be typed on", () => {
+    expect(expandExponent("1e+24")).toBe("1" + "0".repeat(24));
+    expect(expandExponent("1e-8")).toBe("0.00000001");
+    expect(expandExponent("-1.5e+3")).toBe("-1500");
+    expect(expandExponent("42")).toBe("42");
+  });
+
+  it("tokenizes saved expressions, including ASCII operators and √", () => {
+    expect(tokenize("2 × (3 + 1)")).toEqual(["2", "×", "(", "3", "+", "1", ")"]);
+    expect(tokenize("3 * 4 / 2 - 1")).toEqual(["3", "×", "4", "÷", "2", "−", "1"]);
+    expect(tokenize("√(16) + pi")).toEqual(["sqrt(", "1", "6", ")", "+", "π"]);
+    expect(tokenize("2 $ 3")).toBeNull();
+  });
+});
+
+describe("sanitizePaste", () => {
+  const tokensOf = (t: string) => {
+    const r = sanitizePaste(t);
+    if (!r.ok) throw new Error("rejected");
+    return r.tokens;
+  };
+  const paste = (t: string) => toExpression(tokensOf(t).reduce(applyKey, [] as Token[]));
+
+  it("keeps calculator symbols and normalizes ASCII operators", () => {
+    expect(paste("12*3 - 4/2")).toBe("12 × 3 − 4 ÷ 2");
+    expect(paste("1,5 + 2")).toBe("1.5 + 2");
+  });
+
+  it("understands function names and constants", () => {
+    expect(paste("sqrt(16) + PI")).toBe("sqrt(16) + π");
+    expect(paste("sin 30")).toBe("sin(30");
+  });
+
+  it("strips HTML and anything that isn't calculator input", () => {
+    expect(paste("<img src=x onerror=alert(1)>2+3")).toBe("2 + 3");
+    expect(paste("<b>7</b> × 6 = ?")).toBe("7 × 6");
+    expect(paste("hi; drop table")).toBe("");
+  });
+
+  it("rejects input over 500 characters instead of truncating it (N5)", () => {
+    expect(sanitizePaste("1+".repeat(400) + "1")).toEqual({ ok: false, reason: "too-long" });
+    expect(sanitizePaste("1".repeat(500)).ok).toBe(true);
+  });
+
+  it("keeps the value of numbers in e-notation (N2)", () => {
+    expect(paste("1e+24")).toBe("(1 × 10 ^ 24)");
+    expect(paste("2.5e-8")).toBe("(2.5 × 10 ^ −8)");
+    expect(paste("1E3")).toBe("(1 × 10 ^ 3)");
+    expect(paste("2 × 1e3")).toBe("2 × (1 × 10 ^ 3)");
+    // A lone constant e is still Euler's number.
+    expect(paste("2e")).toBe("2 × e");
+  });
+
+  it("converts full-width digits and operators (N6)", () => {
+    expect(paste("１２＋３－４×５÷６")).toBe("12 + 3 − 4 × 5 ÷ 6");
+    expect(paste("（１．５）＊２／３")).toBe("(1.5) × 2 ÷ 3");
+  });
+});
