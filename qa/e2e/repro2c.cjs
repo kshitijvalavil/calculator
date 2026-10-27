@@ -10,7 +10,7 @@ const URL = process.env.URL || 'http://localhost:4599/';
   await p.waitForTimeout(200);
   // Arm a one-shot-able failure: every time-formatting API throws while window.__boom is true.
   await p.addInitScript(() => {
-    window.__boom = sessionStorage.getItem('boom') !== 'off';
+    window.__boom = sessionStorage.getItem('boom') === 'on' || (sessionStorage.getItem('boom') === null && !window.name.includes('disarmed'));
     const wrap = (obj, key) => { const orig = obj[key]; obj[key] = function (...a) { if (window.__boom) throw new Error('forced render failure'); return orig.apply(this, a); }; };
     wrap(Date.prototype, 'toLocaleTimeString'); wrap(Date.prototype, 'toLocaleString'); wrap(Date.prototype, 'toLocaleDateString');
     const fmtDesc = Object.getOwnPropertyDescriptor(Intl.DateTimeFormat.prototype, 'format');
@@ -42,12 +42,13 @@ const URL = process.env.URL || 'http://localhost:4599/';
   const reset = p.getByRole('button', { name: /reset/i });
   console.log('reset buttons on boundary:', await reset.count());
   if (await reset.count()) {
-    await p.evaluate(() => sessionStorage.setItem('boom', 'off'));
-    await reset.first().click(); await p.waitForTimeout(500);
+    await p.evaluate(() => { sessionStorage.setItem('boom', 'off'); window.name = 'disarmed'; window.__boom = false; });
+    await reset.first().click(); await p.waitForTimeout(1200);
+    console.log('body after reset+reload:', JSON.stringify((await p.locator('body').innerText()).replace(/\s+/g, ' ').slice(0, 80)));
     const ok = await p.getByTestId('result').count();
     const stored = await p.evaluate(() => localStorage.getItem('calc.history.v1'));
     console.log('after reset: renders=', !!ok, 'stored history=', JSON.stringify(stored), 'url=', p.url());
-    if (ok) { for (const k of ['2', '+', '2', 'Enter']) await p.keyboard.press(k); await p.waitForTimeout(150); console.log('2+2 after reset ->', await p.getByTestId('result').innerText()); }
+    if (ok) { for (const k of ['2', '+', '2', 'Enter']) await p.keyboard.press(k); await p.waitForTimeout(150); console.log('2+2 after reset -> boom=', await p.evaluate(() => [window.__boom, sessionStorage.getItem('boom'), window.name]), 'body=', JSON.stringify((await p.locator('body').innerText()).replace(/\s+/g, ' ').slice(0, 120))); }
   }
   console.log('page errors:', JSON.stringify(errs.slice(0, 3)));
   await b.close();
